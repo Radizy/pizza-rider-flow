@@ -3,24 +3,41 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { UnitProvider } from "./contexts/UnitContext";
 import Index from "./pages/Index";
+import Config from "./pages/Config";
+import Roteirista from "./pages/Roteirista";
+import TV from "./pages/TV";
+import Checkin from "./pages/Checkin";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <UnitProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner position="top-right" theme="dark" />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/config" element={<Config />} />
+            <Route path="/roteirista" element={<Roteirista />} />
+            <Route path="/tv" element={<TV />} />
+            <Route path="/checkin" element={<Checkin />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </UnitProvider>
   </QueryClientProvider>
 );
 
