@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
 import { Layout, BackButton } from '@/components/Layout';
@@ -11,10 +12,25 @@ import {
 import { toast } from 'sonner';
 import { Users, Loader2, AlertCircle } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export default function Roteirista() {
   const { selectedUnit } = useUnit();
   const queryClient = useQueryClient();
+  
+  const [callDialogOpen, setCallDialogOpen] = useState(false);
+  const [selectedEntregador, setSelectedEntregador] = useState<Entregador | null>(null);
+  const [deliveryCount, setDeliveryCount] = useState('1');
+  const [isSending, setIsSending] = useState(false);
 
   // Redirect if no unit selected
   if (!selectedUnit) {
@@ -40,23 +56,38 @@ export default function Roteirista() {
     },
   });
 
-  const handleCall = async (entregador: Entregador) => {
+  const openCallDialog = (entregador: Entregador) => {
+    setSelectedEntregador(entregador);
+    setDeliveryCount('1');
+    setCallDialogOpen(true);
+  };
+
+  const handleConfirmCall = async () => {
+    if (!selectedEntregador) return;
+    
+    const count = parseInt(deliveryCount) || 1;
+    setIsSending(true);
+    
     try {
       // Update status to "chamado"
       await updateMutation.mutateAsync({
-        id: entregador.id,
+        id: selectedEntregador.id,
         data: { status: 'chamado' },
       });
 
-      // Send WhatsApp message
-      await sendWhatsAppMessage(
-        entregador.telefone,
-        `🍕 Sua vez na unidade ${selectedUnit}! Vá ao balcão.`
-      );
+      // Send WhatsApp message with delivery count
+      const message = count === 1 
+        ? `🍕 Sua vez na unidade ${selectedUnit}! Você tem 1 entrega. Vá ao balcão.`
+        : `🍕 Sua vez na unidade ${selectedUnit}! Você tem ${count} entregas. Vá ao balcão.`;
+      
+      await sendWhatsAppMessage(selectedEntregador.telefone, message);
 
-      toast.success(`${entregador.nome} foi chamado!`);
+      toast.success(`${selectedEntregador.nome} foi chamado com ${count} entrega(s)!`);
+      setCallDialogOpen(false);
     } catch (error) {
       toast.error('Erro ao chamar entregador');
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -180,7 +211,7 @@ export default function Roteirista() {
                     key={entregador.id}
                     entregador={entregador}
                     position={index + 1}
-                    onCall={() => handleCall(entregador)}
+                    onCall={() => openCallDialog(entregador)}
                     isLoading={updateMutation.isPending}
                   />
                 ))}
@@ -189,6 +220,58 @@ export default function Roteirista() {
           </div>
         </div>
       )}
+
+      {/* Call Dialog */}
+      <Dialog open={callDialogOpen} onOpenChange={setCallDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-mono">Chamar Entregador</DialogTitle>
+          </DialogHeader>
+          
+          {selectedEntregador && (
+            <div className="space-y-4 py-4">
+              <div className="bg-secondary/50 rounded-lg p-4">
+                <p className="text-sm text-muted-foreground">Entregador</p>
+                <p className="text-lg font-semibold">{selectedEntregador.nome}</p>
+                <p className="text-sm text-muted-foreground">{selectedEntregador.telefone}</p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="deliveryCount">Quantas entregas?</Label>
+                <Input
+                  id="deliveryCount"
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={deliveryCount}
+                  onChange={(e) => setDeliveryCount(e.target.value)}
+                  className="text-2xl font-mono text-center h-14"
+                />
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCallDialogOpen(false)}
+              disabled={isSending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmCall}
+              disabled={isSending}
+              className="bg-accent hover:bg-accent/90"
+            >
+              {isSending ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
+              Confirmar Chamada
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
