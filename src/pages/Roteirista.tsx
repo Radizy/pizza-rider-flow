@@ -10,7 +10,7 @@ import {
   Entregador,
 } from '@/lib/api';
 import { toast } from 'sonner';
-import { Users, Loader2, AlertCircle } from 'lucide-react';
+import { Users, Loader2, Phone } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import {
   Dialog,
@@ -41,7 +41,7 @@ export default function Roteirista() {
   const { data: entregadores = [], isLoading } = useQuery({
     queryKey: ['entregadores', selectedUnit, 'active'],
     queryFn: () => fetchEntregadores({ unidade: selectedUnit, ativo: true }),
-    refetchInterval: 5000, // Poll every 5 seconds
+    refetchInterval: 5000,
   });
 
   // Mutation for updating status
@@ -56,8 +56,20 @@ export default function Roteirista() {
     },
   });
 
-  const openCallDialog = (entregador: Entregador) => {
-    setSelectedEntregador(entregador);
+  // Filter by status for display
+  const availableQueue = entregadores.filter((e) => e.status === 'disponivel');
+  const calledQueue = entregadores.filter((e) => e.status === 'chamado');
+  const deliveringQueue = entregadores.filter((e) => e.status === 'entregando');
+
+  // Próximo da fila
+  const nextInQueue = availableQueue[0] || null;
+
+  const openCallDialog = () => {
+    if (!nextInQueue) {
+      toast.error('Nenhum entregador na fila!');
+      return;
+    }
+    setSelectedEntregador(nextInQueue);
     setDeliveryCount('1');
     setCallDialogOpen(true);
   };
@@ -91,27 +103,6 @@ export default function Roteirista() {
     }
   };
 
-  const handleReturn = async (entregador: Entregador) => {
-    try {
-      await updateMutation.mutateAsync({
-        id: entregador.id,
-        data: { 
-          status: 'disponivel',
-          fila_posicao: new Date().toISOString(), // Volta para o final da fila
-        },
-      });
-
-      toast.success(`${entregador.nome} voltou para a fila!`);
-    } catch (error) {
-      toast.error('Erro ao registrar retorno');
-    }
-  };
-
-  // Filter by status for display
-  const availableQueue = entregadores.filter((e) => e.status === 'disponivel');
-  const calledQueue = entregadores.filter((e) => e.status === 'chamado');
-  const deliveringQueue = entregadores.filter((e) => e.status === 'entregando');
-
   // Timer para mudar chamados para entregando após 10 segundos
   const timersRef = useRef<Record<string, NodeJS.Timeout>>({});
   
@@ -124,7 +115,7 @@ export default function Roteirista() {
             data: { status: 'entregando' },
           });
           delete timersRef.current[entregador.id];
-        }, 10000); // 10 segundos
+        }, 10000);
       }
     });
 
@@ -145,13 +136,27 @@ export default function Roteirista() {
     <Layout>
       <BackButton />
 
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-3xl font-bold font-mono mb-2">Roteirista</h1>
         <p className="text-muted-foreground">
           Controle da fila de entregas •{' '}
           <span className="font-semibold text-foreground">{selectedUnit}</span>
         </p>
       </div>
+
+      {/* Botão Grande CHAMAR O PRÓXIMO */}
+      <Button
+        onClick={openCallDialog}
+        disabled={!nextInQueue || isLoading}
+        className="w-full h-24 text-2xl font-bold font-mono mb-8 bg-accent hover:bg-accent/90 text-accent-foreground gap-4"
+      >
+        <Phone className="w-8 h-8" />
+        {nextInQueue ? (
+          <>CHAMAR: {nextInQueue.nome.toUpperCase()}</>
+        ) : (
+          <>NENHUM NA FILA</>
+        )}
+      </Button>
 
       {/* Stats Row */}
       <div className="grid grid-cols-3 gap-4 mb-8">
@@ -184,32 +189,12 @@ export default function Roteirista() {
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Called Section */}
-          {calledQueue.length > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-accent" />
-                Chamados Aguardando
-              </h2>
-              <div className="space-y-3">
-                {calledQueue.map((entregador, index) => (
-                  <QueueCard
-                    key={entregador.id}
-                    entregador={entregador}
-                    position={index + 1}
-                    isLoading={updateMutation.isPending}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Delivering Section */}
+          {/* Em Entrega Section */}
           {deliveringQueue.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-status-delivering" />
-                Em Entrega
+                Em Entrega ({deliveringQueue.length})
               </h2>
               <div className="space-y-3">
                 {deliveringQueue.map((entregador, index) => (
@@ -217,7 +202,6 @@ export default function Roteirista() {
                     key={entregador.id}
                     entregador={entregador}
                     position={index + 1}
-                    onReturn={() => handleReturn(entregador)}
                     isLoading={updateMutation.isPending}
                   />
                 ))}
@@ -229,7 +213,7 @@ export default function Roteirista() {
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Users className="w-5 h-5 text-primary" />
-              Fila de Disponíveis
+              Fila de Disponíveis ({availableQueue.length})
             </h2>
             {availableQueue.length === 0 ? (
               <div className="text-center py-12 bg-card border border-dashed border-border rounded-lg">
@@ -243,7 +227,11 @@ export default function Roteirista() {
                     key={entregador.id}
                     entregador={entregador}
                     position={index + 1}
-                    onCall={() => openCallDialog(entregador)}
+                    onCall={() => {
+                      setSelectedEntregador(entregador);
+                      setDeliveryCount('1');
+                      setCallDialogOpen(true);
+                    }}
                     isLoading={updateMutation.isPending}
                   />
                 ))}
@@ -257,19 +245,19 @@ export default function Roteirista() {
       <Dialog open={callDialogOpen} onOpenChange={setCallDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-mono">Chamar Entregador</DialogTitle>
+            <DialogTitle className="font-mono text-2xl">Chamar Entregador</DialogTitle>
           </DialogHeader>
           
           {selectedEntregador && (
             <div className="space-y-4 py-4">
-              <div className="bg-secondary/50 rounded-lg p-4">
-                <p className="text-sm text-muted-foreground">Entregador</p>
-                <p className="text-lg font-semibold">{selectedEntregador.nome}</p>
-                <p className="text-sm text-muted-foreground">{selectedEntregador.telefone}</p>
+              <div className="bg-accent/20 border-2 border-accent rounded-lg p-6 text-center">
+                <p className="text-sm text-muted-foreground mb-1">Próximo da fila</p>
+                <p className="text-3xl font-bold font-mono text-accent">{selectedEntregador.nome}</p>
+                <p className="text-sm text-muted-foreground mt-1">{selectedEntregador.telefone}</p>
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="deliveryCount">Quantas entregas?</Label>
+                <Label htmlFor="deliveryCount" className="text-lg">Quantas entregas?</Label>
                 <Input
                   id="deliveryCount"
                   type="number"
@@ -277,29 +265,30 @@ export default function Roteirista() {
                   max="10"
                   value={deliveryCount}
                   onChange={(e) => setDeliveryCount(e.target.value)}
-                  className="text-2xl font-mono text-center h-14"
+                  className="text-4xl font-mono text-center h-20"
                 />
               </div>
             </div>
           )}
           
-          <DialogFooter>
+          <DialogFooter className="gap-3">
             <Button
               variant="outline"
               onClick={() => setCallDialogOpen(false)}
               disabled={isSending}
+              className="flex-1"
             >
               Cancelar
             </Button>
             <Button
               onClick={handleConfirmCall}
               disabled={isSending}
-              className="bg-accent hover:bg-accent/90"
+              className="flex-1 bg-accent hover:bg-accent/90 text-lg h-12"
             >
               {isSending ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
               ) : null}
-              Confirmar Chamada
+              CHAMAR
             </Button>
           </DialogFooter>
         </DialogContent>

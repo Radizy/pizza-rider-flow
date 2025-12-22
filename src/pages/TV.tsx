@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
 import { fetchEntregadores, updateEntregador, Entregador } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import { Pizza, User, Volume2, VolumeX } from 'lucide-react';
+import { Pizza, User, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import { Navigate, Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 const CALL_AUDIO_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
 const AUTO_DELIVER_DELAY = 15000; // 15 seconds
@@ -25,7 +26,7 @@ export default function TV() {
   const { data: entregadores = [] } = useQuery({
     queryKey: ['entregadores', selectedUnit, 'tv'],
     queryFn: () => fetchEntregadores({ unidade: selectedUnit, ativo: true }),
-    refetchInterval: 5000, // Poll every 5 seconds
+    refetchInterval: 5000,
   });
 
   // Mutation for updating status
@@ -40,6 +41,7 @@ export default function TV() {
   // Filter entregadores
   const availableQueue = entregadores.filter((e) => e.status === 'disponivel');
   const calledEntregadores = entregadores.filter((e) => e.status === 'chamado');
+  const deliveringQueue = entregadores.filter((e) => e.status === 'entregando');
 
   // Play audio when someone is called
   useEffect(() => {
@@ -88,6 +90,70 @@ export default function TV() {
     };
   }, [calledEntregadores]);
 
+  const handleReturn = async (entregador: Entregador) => {
+    try {
+      await updateMutation.mutateAsync({
+        id: entregador.id,
+        data: { 
+          status: 'disponivel',
+          fila_posicao: new Date().toISOString(),
+        },
+      });
+      toast.success(`${entregador.nome} voltou para a fila!`);
+    } catch (error) {
+      toast.error('Erro ao registrar retorno');
+    }
+  };
+
+  // Se tem alguém chamado, mostra tela fullscreen
+  if (calledEntregadores.length > 0) {
+    const chamado = calledEntregadores[0];
+    return (
+      <div className="min-h-screen bg-accent flex flex-col items-center justify-center p-8">
+        <audio ref={audioRef} src={CALL_AUDIO_URL} preload="auto" />
+        
+        <div className="text-center animate-fade-in">
+          <p className="text-2xl md:text-4xl text-accent-foreground/80 mb-4 font-mono">
+            AGORA É SUA VEZ
+          </p>
+          
+          <div className="w-32 h-32 md:w-48 md:h-48 rounded-full bg-background mx-auto mb-8 flex items-center justify-center glow-pulse">
+            <User className="w-16 h-16 md:w-24 md:h-24 text-accent" />
+          </div>
+          
+          <h1 className="text-5xl md:text-8xl lg:text-9xl font-bold font-mono text-accent-foreground text-glow mb-8">
+            {chamado.nome.toUpperCase()}
+          </h1>
+          
+          <p className="text-xl md:text-3xl text-accent-foreground/80">
+            Dirija-se ao balcão
+          </p>
+        </div>
+
+        {/* Mute button */}
+        <button
+          onClick={() => setIsMuted(!isMuted)}
+          className="absolute top-6 right-6 p-3 rounded-lg bg-background/20 hover:bg-background/30 transition-colors"
+        >
+          {isMuted ? (
+            <VolumeX className="w-6 h-6 text-accent-foreground" />
+          ) : (
+            <Volume2 className="w-6 h-6 text-accent-foreground" />
+          )}
+        </button>
+
+        {/* Back to home */}
+        <Link 
+          to="/" 
+          className="absolute top-6 left-6 flex items-center gap-2 px-4 py-2 rounded-lg bg-background/20 hover:bg-background/30 transition-colors text-accent-foreground"
+        >
+          <Pizza className="w-5 h-5" />
+          <span className="font-mono font-bold">DeliveryOS</span>
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Hidden audio element */}
@@ -125,7 +191,7 @@ export default function TV() {
         <div className="border-r border-border p-8 overflow-hidden">
           <h2 className="text-2xl font-bold font-mono mb-6 flex items-center gap-3">
             <div className="w-4 h-4 rounded-full bg-status-available" />
-            Fila de Espera
+            Fila de Espera ({availableQueue.length})
           </h2>
 
           {availableQueue.length === 0 ? (
@@ -153,34 +219,46 @@ export default function TV() {
           )}
         </div>
 
-        {/* Right Column - Called */}
-        <div className="p-8 flex items-center justify-center">
-          {calledEntregadores.length === 0 ? (
-            <div className="text-center">
-              <div className="w-32 h-32 rounded-full bg-secondary mx-auto mb-6 flex items-center justify-center">
-                <User className="w-16 h-16 text-muted-foreground" />
+        {/* Right Column - Em Entrega com botão Retornar */}
+        <div className="p-8 overflow-hidden">
+          <h2 className="text-2xl font-bold font-mono mb-6 flex items-center gap-3">
+            <div className="w-4 h-4 rounded-full bg-status-delivering" />
+            Em Entrega ({deliveringQueue.length})
+          </h2>
+
+          {deliveringQueue.length === 0 ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <div className="w-24 h-24 rounded-full bg-secondary mx-auto mb-4 flex items-center justify-center">
+                  <User className="w-12 h-12 text-muted-foreground" />
+                </div>
+                <p className="text-xl text-muted-foreground">Nenhum entregador em entrega</p>
               </div>
-              <p className="text-2xl text-muted-foreground">Aguardando chamada...</p>
             </div>
           ) : (
-            <div className="text-center space-y-8">
-              {calledEntregadores.map((entregador) => (
+            <div className="space-y-4">
+              {deliveringQueue.map((entregador, index) => (
                 <div
                   key={entregador.id}
-                  className={cn(
-                    'p-12 rounded-3xl border-4 border-accent bg-accent/10',
-                    'glow-pulse'
-                  )}
+                  className="flex items-center gap-4 bg-card border border-border rounded-xl p-4"
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <div className="w-32 h-32 rounded-full bg-accent mx-auto mb-8 flex items-center justify-center">
-                    <User className="w-16 h-16 text-accent-foreground" />
+                  <div className="w-14 h-14 rounded-full bg-status-delivering/20 flex items-center justify-center">
+                    <User className="w-7 h-7 text-status-delivering" />
                   </div>
-                  <h2 className="text-6xl font-bold font-mono text-accent text-glow mb-4">
-                    {entregador.nome.toUpperCase()}
-                  </h2>
-                  <p className="text-2xl text-muted-foreground">
-                    Dirija-se ao balcão
-                  </p>
+                  <div className="flex-1">
+                    <p className="text-xl font-semibold">{entregador.nome}</p>
+                  </div>
+                  <Button
+                    onClick={() => handleReturn(entregador)}
+                    disabled={updateMutation.isPending}
+                    variant="outline"
+                    size="lg"
+                    className="gap-2 text-lg px-6"
+                  >
+                    <RotateCcw className="w-5 h-5" />
+                    Retornar
+                  </Button>
                 </div>
               ))}
             </div>
