@@ -26,7 +26,7 @@ export default function Checkin() {
 
   // Mutation for check-in (return to queue)
   const checkinMutation = useMutation({
-    mutationFn: (id: number) => updateEntregador(id, { status: 'disponivel' }),
+    mutationFn: (id: string) => updateEntregador(id, { status: 'disponivel' }),
     onSuccess: (_, id) => {
       const entregador = entregadores.find((e) => e.id === id);
       queryClient.invalidateQueries({ queryKey: ['entregadores'] });
