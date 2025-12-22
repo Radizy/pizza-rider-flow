@@ -1,11 +1,6 @@
 // Lovable Cloud API configuration
 import { supabase } from "@/integrations/supabase/client";
 
-// Evolution API configuration (WhatsApp)
-const EVOLUTION_URL = 'https://dom-evolution-api.bxsvmp.easypanel.host';
-const EVOLUTION_API_KEY = '429683C4C977415CAAFCCE10F7D57E11';
-const EVOLUTION_INSTANCE = 'pizzaria';
-
 export type Unidade = 'ITAQUA' | 'POA' | 'SUZANO';
 export type Status = 'disponivel' | 'chamado' | 'entregando';
 
@@ -110,35 +105,18 @@ export async function deleteEntregador(id: string): Promise<void> {
   }
 }
 
-// Send WhatsApp message via Evolution API
+// Send WhatsApp message via Edge Function
 export async function sendWhatsAppMessage(
   telefone: string,
   message: string
 ): Promise<void> {
-  // Format phone number (remove non-digits and ensure country code)
-  let formattedNumber = telefone.replace(/\D/g, '');
-  if (!formattedNumber.startsWith('55')) {
-    formattedNumber = '55' + formattedNumber;
-  }
+  const { error } = await supabase.functions.invoke('send-whatsapp', {
+    body: { telefone, message },
+  });
 
-  const response = await fetch(
-    `${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`,
-    {
-      method: 'POST',
-      mode: 'cors',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': EVOLUTION_API_KEY,
-      },
-      body: JSON.stringify({
-        number: formattedNumber,
-        text: message,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    console.error('Failed to send WhatsApp message');
+  if (error) {
+    console.error('Failed to send WhatsApp message:', error);
+    throw new Error('Failed to send WhatsApp message');
   }
 }
 
