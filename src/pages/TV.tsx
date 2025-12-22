@@ -14,7 +14,7 @@ export default function TV() {
   const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [calledTimers, setCalledTimers] = useState<Record<number, NodeJS.Timeout>>({});
+  const [calledTimers, setCalledTimers] = useState<Record<string, NodeJS.Timeout>>({});
 
   // Redirect if no unit selected
   if (!selectedUnit) {
@@ -30,7 +30,7 @@ export default function TV() {
 
   // Mutation for updating status
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Entregador> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<Entregador> }) =>
       updateEntregador(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregadores'] });
@@ -72,8 +72,7 @@ export default function TV() {
     });
 
     // Cleanup timers for entregadores no longer called
-    Object.keys(calledTimers).forEach((idStr) => {
-      const id = parseInt(idStr);
+    Object.keys(calledTimers).forEach((id) => {
       if (!calledEntregadores.find((e) => e.id === id)) {
         clearTimeout(calledTimers[id]);
         setCalledTimers((prev) => {

@@ -69,7 +69,7 @@ export default function Config() {
 
   // Mutation for updating entregador
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Entregador> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<Entregador> }) =>
       updateEntregador(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregadores'] });
@@ -143,7 +143,7 @@ export default function Config() {
     });
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (confirm('Tem certeza que deseja excluir este entregador?')) {
       deleteMutation.mutate(id);
     }

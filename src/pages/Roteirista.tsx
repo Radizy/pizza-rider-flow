@@ -30,7 +30,7 @@ export default function Roteirista() {
 
   // Mutation for updating status
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Entregador> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<Entregador> }) =>
       updateEntregador(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregadores'] });
