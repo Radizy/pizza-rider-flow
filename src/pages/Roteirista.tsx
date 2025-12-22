@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
 import { Layout, BackButton } from '@/components/Layout';
@@ -95,7 +95,10 @@ export default function Roteirista() {
     try {
       await updateMutation.mutateAsync({
         id: entregador.id,
-        data: { status: 'disponivel' },
+        data: { 
+          status: 'disponivel',
+          fila_posicao: new Date().toISOString(), // Volta para o final da fila
+        },
       });
 
       toast.success(`${entregador.nome} voltou para a fila!`);
@@ -108,6 +111,35 @@ export default function Roteirista() {
   const availableQueue = entregadores.filter((e) => e.status === 'disponivel');
   const calledQueue = entregadores.filter((e) => e.status === 'chamado');
   const deliveringQueue = entregadores.filter((e) => e.status === 'entregando');
+
+  // Timer para mudar chamados para entregando após 10 segundos
+  const timersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  
+  useEffect(() => {
+    calledQueue.forEach((entregador) => {
+      if (!timersRef.current[entregador.id]) {
+        timersRef.current[entregador.id] = setTimeout(() => {
+          updateMutation.mutate({
+            id: entregador.id,
+            data: { status: 'entregando' },
+          });
+          delete timersRef.current[entregador.id];
+        }, 10000); // 10 segundos
+      }
+    });
+
+    // Limpar timers para entregadores que não estão mais como chamado
+    Object.keys(timersRef.current).forEach((id) => {
+      if (!calledQueue.find((e) => e.id === id)) {
+        clearTimeout(timersRef.current[id]);
+        delete timersRef.current[id];
+      }
+    });
+
+    return () => {
+      Object.values(timersRef.current).forEach(clearTimeout);
+    };
+  }, [calledQueue]);
 
   return (
     <Layout>

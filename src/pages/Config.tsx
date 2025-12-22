@@ -137,9 +137,16 @@ export default function Config() {
   };
 
   const handleToggleAtivo = (entregador: Entregador) => {
+    const updateData: Partial<Entregador> = { ativo: !entregador.ativo };
+    
+    // Se está ativando, atualiza a posição na fila para o momento atual
+    if (!entregador.ativo) {
+      updateData.fila_posicao = new Date().toISOString();
+    }
+    
     updateMutation.mutate({
       id: entregador.id,
-      data: { ativo: !entregador.ativo },
+      data: updateData,
     });
   };
 
