@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const EVOLUTION_URL = 'https://dom-evolution-api.adhwpy.easypanel.host';
 const EVOLUTION_API_KEY = 'E7BCA4BB4535-4C3C-8C97-744315F4DECE';
-const EVOLUTION_INSTANCE = '67ace21b-d93a-41e4-8eb3-c2443983423a';
+const EVOLUTION_INSTANCE = 'pizzaria';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
