@@ -13,6 +13,7 @@ export interface Entregador {
   ativo: boolean;
   created_at?: string;
   updated_at?: string;
+  fila_posicao?: string;
 }
 
 export interface CreateEntregadorData {
@@ -31,8 +32,8 @@ export async function fetchEntregadores(filters?: {
 }): Promise<Entregador[]> {
   let query = supabase
     .from('entregadores')
-    .select('id, nome, telefone, status, unidade, ativo, created_at, updated_at')
-    .order('created_at', { ascending: true });
+    .select('id, nome, telefone, status, unidade, ativo, created_at, updated_at, fila_posicao')
+    .order('fila_posicao', { ascending: true });
 
   if (filters?.unidade) {
     query = query.eq('unidade', filters.unidade);

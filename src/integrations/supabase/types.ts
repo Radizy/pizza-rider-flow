@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           ativo: boolean
           created_at: string
+          fila_posicao: string | null
           id: string
           nome: string
           status: string
@@ -28,6 +29,7 @@ export type Database = {
         Insert: {
           ativo?: boolean
           created_at?: string
+          fila_posicao?: string | null
           id?: string
           nome: string
           status?: string
@@ -38,6 +40,7 @@ export type Database = {
         Update: {
           ativo?: boolean
           created_at?: string
+          fila_posicao?: string | null
           id?: string
           nome?: string
           status?: string
