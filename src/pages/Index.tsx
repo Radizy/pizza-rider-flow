@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { useUnit } from '@/contexts/UnitContext';
 import { Unidade } from '@/lib/api';
-import { Pizza, MapPin, ArrowRight, Users, Tv, Settings, UserCheck } from 'lucide-react';
+import { Pizza, MapPin, ArrowRight, Users, Tv, Settings, History, Smartphone } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const units: { value: Unidade; label: string; description: string; gradient: string }[] = [
   {
@@ -28,7 +29,7 @@ const features = [
   { icon: Settings, label: 'Configuração', description: 'Cadastre e gerencie motoboys' },
   { icon: Users, label: 'Roteirista', description: 'Controle a fila de entregas' },
   { icon: Tv, label: 'Tela TV', description: 'Chamada visual e sonora' },
-  { icon: UserCheck, label: 'Check-in', description: 'Retorno automático à fila' },
+  { icon: History, label: 'Histórico', description: 'Contagem de entregas do dia' },
 ];
 
 export default function Index() {
@@ -54,7 +55,7 @@ export default function Index() {
               <Pizza className="w-10 h-10 text-primary-foreground" />
             </div>
             <h1 className="font-mono text-5xl font-bold mb-4 bg-gradient-to-r from-foreground via-foreground to-muted-foreground bg-clip-text">
-              DeliveryOS
+              Fila Dom Fiorentino
             </h1>
             <p className="text-xl text-muted-foreground max-w-xl">
               Sistema profissional de gestão de entregas com controle de fila,
@@ -93,6 +94,27 @@ export default function Index() {
             </div>
           </div>
 
+          {/* Motoboy Link */}
+          <div className="max-w-md mx-auto mb-12">
+            <Link
+              to="/meu-lugar"
+              className="flex items-center justify-between bg-card border border-border rounded-xl p-6 hover:border-primary/50 hover:shadow-lg transition-all group"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-accent/20 flex items-center justify-center">
+                  <Smartphone className="w-6 h-6 text-accent" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-lg">Sou Motoboy</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Consulte sua posição na fila
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+            </Link>
+          </div>
+
           {/* Features Grid */}
           <div className="max-w-4xl mx-auto">
             <h2 className="text-center text-lg font-medium text-muted-foreground mb-6">
@@ -122,7 +144,7 @@ export default function Index() {
       {/* Footer */}
       <footer className="border-t border-border py-6">
         <div className="container text-center text-sm text-muted-foreground">
-          <p>Sistema de gestão de entregas • Rede de Pizzarias</p>
+          <p>Fila Dom Fiorentino • Sistema de Gestão de Entregas</p>
         </div>
       </footer>
     </div>

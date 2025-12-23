@@ -18,37 +18,93 @@ export type Database = {
         Row: {
           ativo: boolean
           created_at: string
+          dias_trabalho: Json | null
           fila_posicao: string | null
+          hora_saida: string | null
           id: string
           nome: string
           status: string
           telefone: string
+          tipo_bag: string | null
+          turno_fim: string | null
+          turno_inicio: string | null
           unidade: string
           updated_at: string
+          usar_turno_padrao: boolean | null
         }
         Insert: {
           ativo?: boolean
           created_at?: string
+          dias_trabalho?: Json | null
           fila_posicao?: string | null
+          hora_saida?: string | null
           id?: string
           nome: string
           status?: string
           telefone: string
+          tipo_bag?: string | null
+          turno_fim?: string | null
+          turno_inicio?: string | null
           unidade: string
           updated_at?: string
+          usar_turno_padrao?: boolean | null
         }
         Update: {
           ativo?: boolean
           created_at?: string
+          dias_trabalho?: Json | null
           fila_posicao?: string | null
+          hora_saida?: string | null
           id?: string
           nome?: string
           status?: string
           telefone?: string
+          tipo_bag?: string | null
+          turno_fim?: string | null
+          turno_inicio?: string | null
           unidade?: string
           updated_at?: string
+          usar_turno_padrao?: boolean | null
         }
         Relationships: []
+      }
+      historico_entregas: {
+        Row: {
+          created_at: string
+          entregador_id: string
+          hora_retorno: string | null
+          hora_saida: string
+          id: string
+          tipo_bag: string | null
+          unidade: string
+        }
+        Insert: {
+          created_at?: string
+          entregador_id: string
+          hora_retorno?: string | null
+          hora_saida?: string
+          id?: string
+          tipo_bag?: string | null
+          unidade: string
+        }
+        Update: {
+          created_at?: string
+          entregador_id?: string
+          hora_retorno?: string | null
+          hora_saida?: string
+          id?: string
+          tipo_bag?: string | null
+          unidade?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "historico_entregas_entregador_id_fkey"
+            columns: ["entregador_id"]
+            isOneToOne: false
+            referencedRelation: "entregadores"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
