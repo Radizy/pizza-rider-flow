@@ -8,7 +8,8 @@ import Index from "./pages/Index";
 import Config from "./pages/Config";
 import Roteirista from "./pages/Roteirista";
 import TV from "./pages/TV";
-import Checkin from "./pages/Checkin";
+import Historico from "./pages/Historico";
+import MeuLugar from "./pages/MeuLugar";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -32,7 +33,8 @@ const App = () => (
             <Route path="/config" element={<Config />} />
             <Route path="/roteirista" element={<Roteirista />} />
             <Route path="/tv" element={<TV />} />
-            <Route path="/checkin" element={<Checkin />} />
+            <Route path="/historico" element={<Historico />} />
+            <Route path="/meu-lugar" element={<MeuLugar />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

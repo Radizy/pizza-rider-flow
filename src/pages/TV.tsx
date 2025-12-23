@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
-import { fetchEntregadores, updateEntregador, Entregador } from '@/lib/api';
-import { Pizza, User, Volume2, VolumeX, RotateCcw } from 'lucide-react';
+import { 
+  fetchEntregadores, 
+  updateEntregador, 
+  shouldShowInQueue,
+  isOverTimeLimit,
+  Entregador 
+} from '@/lib/api';
+import { Pizza, User, Volume2, VolumeX, RotateCcw, Package } from 'lucide-react';
 import { Navigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -38,8 +44,9 @@ export default function TV() {
     },
   });
 
-  // Filter entregadores
-  const availableQueue = entregadores.filter((e) => e.status === 'disponivel');
+  // Filter entregadores (with shift/workday check for available)
+  const availableQueue = entregadores
+    .filter((e) => e.status === 'disponivel' && shouldShowInQueue(e));
   const calledEntregadores = entregadores.filter((e) => e.status === 'chamado');
   const deliveringQueue = entregadores.filter((e) => e.status === 'entregando');
 
@@ -60,7 +67,10 @@ export default function TV() {
         const timer = setTimeout(() => {
           updateMutation.mutate({
             id: entregador.id,
-            data: { status: 'entregando' },
+            data: { 
+              status: 'entregando',
+              hora_saida: new Date().toISOString(),
+            },
           });
           setCalledTimers((prev) => {
             const newTimers = { ...prev };
@@ -90,6 +100,30 @@ export default function TV() {
     };
   }, [calledEntregadores]);
 
+  // Failsafe: Auto-return after 1 hour in delivery
+  useEffect(() => {
+    const checkOvertime = () => {
+      deliveringQueue.forEach((entregador) => {
+        if (entregador.hora_saida && isOverTimeLimit(entregador.hora_saida)) {
+          updateMutation.mutate({
+            id: entregador.id,
+            data: { 
+              status: 'disponivel',
+              fila_posicao: new Date().toISOString(),
+              hora_saida: null,
+            },
+          });
+          toast.info(`${entregador.nome} retornou automaticamente após 1 hora`);
+        }
+      });
+    };
+
+    const interval = setInterval(checkOvertime, 60000);
+    checkOvertime();
+
+    return () => clearInterval(interval);
+  }, [deliveringQueue]);
+
   const handleReturn = async (entregador: Entregador) => {
     try {
       await updateMutation.mutateAsync({
@@ -97,6 +131,7 @@ export default function TV() {
         data: { 
           status: 'disponivel',
           fila_posicao: new Date().toISOString(),
+          hora_saida: null,
         },
       });
       toast.success(`${entregador.nome} voltou para a fila!`);
@@ -108,6 +143,9 @@ export default function TV() {
   // Se tem alguém chamado, mostra tela fullscreen
   if (calledEntregadores.length > 0) {
     const chamado = calledEntregadores[0];
+    const bagText = chamado.tipo_bag === 'metro' ? 'BAG METRO' : 'BAG NORMAL';
+    const bagIcon = chamado.tipo_bag === 'metro' ? '📦' : '🎒';
+    
     return (
       <div className="min-h-screen bg-accent flex flex-col items-center justify-center p-8">
         <audio ref={audioRef} src={CALL_AUDIO_URL} preload="auto" />
@@ -124,6 +162,14 @@ export default function TV() {
           <h1 className="text-5xl md:text-8xl lg:text-9xl font-bold font-mono text-accent-foreground text-glow mb-8">
             {chamado.nome.toUpperCase()}
           </h1>
+
+          {/* Tipo de BAG */}
+          <div className="bg-background/20 rounded-2xl px-8 py-4 mb-8 inline-flex items-center gap-4">
+            <span className="text-4xl md:text-6xl">{bagIcon}</span>
+            <span className="text-2xl md:text-4xl font-bold font-mono text-accent-foreground">
+              {bagText}
+            </span>
+          </div>
           
           <p className="text-xl md:text-3xl text-accent-foreground/80">
             Dirija-se ao balcão
@@ -148,7 +194,7 @@ export default function TV() {
           className="absolute top-6 left-6 flex items-center gap-2 px-4 py-2 rounded-lg bg-background/20 hover:bg-background/30 transition-colors text-accent-foreground"
         >
           <Pizza className="w-5 h-5" />
-          <span className="font-mono font-bold">DeliveryOS</span>
+          <span className="font-mono font-bold">Fila Dom Fiorentino</span>
         </Link>
       </div>
     );
@@ -166,7 +212,7 @@ export default function TV() {
             <Pizza className="w-6 h-6 text-primary-foreground" />
           </div>
           <div>
-            <span className="font-mono font-bold text-xl">DeliveryOS</span>
+            <span className="font-mono font-bold text-xl">Fila Dom Fiorentino</span>
             <span className="ml-3 px-3 py-1 rounded-full bg-secondary text-sm font-medium">
               {selectedUnit}
             </span>
@@ -219,7 +265,7 @@ export default function TV() {
           )}
         </div>
 
-        {/* Right Column - Em Entrega com botão Retornar */}
+        {/* Right Column - Em Entrega com botão Voltar para Fila */}
         <div className="p-8 overflow-hidden">
           <h2 className="text-2xl font-bold font-mono mb-6 flex items-center gap-3">
             <div className="w-4 h-4 rounded-full bg-status-delivering" />
@@ -248,6 +294,12 @@ export default function TV() {
                   </div>
                   <div className="flex-1">
                     <p className="text-xl font-semibold">{entregador.nome}</p>
+                    {entregador.tipo_bag && (
+                      <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                        <Package className="w-4 h-4" />
+                        <span>{entregador.tipo_bag === 'metro' ? 'BAG Metro' : 'BAG Normal'}</span>
+                      </div>
+                    )}
                   </div>
                   <Button
                     onClick={() => handleReturn(entregador)}
@@ -257,7 +309,7 @@ export default function TV() {
                     className="gap-2 text-lg px-6"
                   >
                     <RotateCcw className="w-5 h-5" />
-                    Retornar
+                    Voltar para Fila
                   </Button>
                 </div>
               ))}

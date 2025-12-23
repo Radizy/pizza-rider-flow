@@ -6,6 +6,8 @@ import { EntregadorCard } from '@/components/EntregadorCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -26,10 +28,32 @@ import {
   deleteEntregador,
   Entregador,
   Unidade,
+  DiasTrabalho,
+  TURNO_PADRAO,
 } from '@/lib/api';
 import { toast } from 'sonner';
 import { Plus, Users, Loader2 } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
+
+const DIAS_SEMANA = [
+  { key: 'seg', label: 'Segunda' },
+  { key: 'ter', label: 'Terça' },
+  { key: 'qua', label: 'Quarta' },
+  { key: 'qui', label: 'Quinta' },
+  { key: 'sex', label: 'Sexta' },
+  { key: 'sab', label: 'Sábado' },
+  { key: 'dom', label: 'Domingo' },
+] as const;
+
+const DEFAULT_DIAS_TRABALHO: DiasTrabalho = {
+  dom: true,
+  seg: true,
+  ter: true,
+  qua: true,
+  qui: true,
+  sex: true,
+  sab: true,
+};
 
 export default function Config() {
   const { selectedUnit } = useUnit();
@@ -41,6 +65,10 @@ export default function Config() {
     nome: '',
     telefone: '',
     unidade: selectedUnit || ('ITAQUA' as Unidade),
+    dias_trabalho: DEFAULT_DIAS_TRABALHO,
+    usar_turno_padrao: true,
+    turno_inicio: TURNO_PADRAO.inicio.slice(0, 5), // HH:MM format
+    turno_fim: TURNO_PADRAO.fim.slice(0, 5),
   });
 
   // Redirect if no unit selected
@@ -94,7 +122,15 @@ export default function Config() {
   });
 
   const resetForm = () => {
-    setFormData({ nome: '', telefone: '', unidade: selectedUnit });
+    setFormData({
+      nome: '',
+      telefone: '',
+      unidade: selectedUnit,
+      dias_trabalho: DEFAULT_DIAS_TRABALHO,
+      usar_turno_padrao: true,
+      turno_inicio: TURNO_PADRAO.inicio.slice(0, 5),
+      turno_fim: TURNO_PADRAO.fim.slice(0, 5),
+    });
     setEditingEntregador(null);
     setIsFormOpen(false);
   };
@@ -107,12 +143,19 @@ export default function Config() {
       return;
     }
 
+    const turnoInicio = formData.turno_inicio + ':00';
+    const turnoFim = formData.turno_fim + ':00';
+
     if (editingEntregador) {
       updateMutation.mutate({
         id: editingEntregador.id,
         data: {
           nome: formData.nome,
           telefone: formData.telefone,
+          dias_trabalho: formData.dias_trabalho,
+          usar_turno_padrao: formData.usar_turno_padrao,
+          turno_inicio: turnoInicio,
+          turno_fim: turnoFim,
         },
       });
     } else {
@@ -122,6 +165,10 @@ export default function Config() {
         unidade: formData.unidade,
         status: 'disponivel',
         ativo: true,
+        dias_trabalho: formData.dias_trabalho,
+        usar_turno_padrao: formData.usar_turno_padrao,
+        turno_inicio: turnoInicio,
+        turno_fim: turnoFim,
       });
     }
   };
@@ -132,6 +179,10 @@ export default function Config() {
       nome: entregador.nome,
       telefone: entregador.telefone,
       unidade: entregador.unidade,
+      dias_trabalho: entregador.dias_trabalho || DEFAULT_DIAS_TRABALHO,
+      usar_turno_padrao: entregador.usar_turno_padrao !== false,
+      turno_inicio: entregador.turno_inicio?.slice(0, 5) || TURNO_PADRAO.inicio.slice(0, 5),
+      turno_fim: entregador.turno_fim?.slice(0, 5) || TURNO_PADRAO.fim.slice(0, 5),
     });
     setIsFormOpen(true);
   };
@@ -154,6 +205,16 @@ export default function Config() {
     if (confirm('Tem certeza que deseja excluir este entregador?')) {
       deleteMutation.mutate(id);
     }
+  };
+
+  const handleDiaChange = (dia: keyof DiasTrabalho, checked: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      dias_trabalho: {
+        ...prev.dias_trabalho,
+        [dia]: checked,
+      },
+    }));
   };
 
   const activeCount = entregadores.filter((e) => e.ativo).length;
@@ -233,13 +294,13 @@ export default function Config() {
 
       {/* Form Dialog */}
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-mono">
               {editingEntregador ? 'Editar Entregador' : 'Novo Entregador'}
             </DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="nome">Nome</Label>
               <Input
@@ -284,6 +345,76 @@ export default function Config() {
                 </Select>
               </div>
             )}
+
+            {/* Dias de Trabalho */}
+            <div className="space-y-3">
+              <Label>Dias de Trabalho</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {DIAS_SEMANA.map((dia) => (
+                  <div key={dia.key} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`dia-${dia.key}`}
+                      checked={formData.dias_trabalho[dia.key]}
+                      onCheckedChange={(checked) =>
+                        handleDiaChange(dia.key, checked as boolean)
+                      }
+                    />
+                    <Label
+                      htmlFor={`dia-${dia.key}`}
+                      className="text-sm font-normal cursor-pointer"
+                    >
+                      {dia.label}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Turno */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label>Turno</Label>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="turno-padrao"
+                    checked={formData.usar_turno_padrao}
+                    onCheckedChange={(checked) =>
+                      setFormData((prev) => ({ ...prev, usar_turno_padrao: checked }))
+                    }
+                  />
+                  <Label htmlFor="turno-padrao" className="text-sm font-normal cursor-pointer">
+                    Turno padrão (16:00 - 02:00)
+                  </Label>
+                </div>
+              </div>
+
+              {!formData.usar_turno_padrao && (
+                <div className="grid grid-cols-2 gap-4 p-4 bg-secondary/50 rounded-lg">
+                  <div className="space-y-2">
+                    <Label htmlFor="turno-inicio">Início</Label>
+                    <Input
+                      id="turno-inicio"
+                      type="time"
+                      value={formData.turno_inicio}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, turno_inicio: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="turno-fim">Fim</Label>
+                    <Input
+                      id="turno-fim"
+                      type="time"
+                      value={formData.turno_fim}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, turno_fim: e.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="flex gap-3 pt-4">
               <Button

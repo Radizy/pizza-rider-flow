@@ -7,7 +7,11 @@ import {
   fetchEntregadores,
   updateEntregador,
   sendWhatsAppMessage,
+  createHistoricoEntrega,
+  shouldShowInQueue,
+  isOverTimeLimit,
   Entregador,
+  TipoBag,
 } from '@/lib/api';
 import { toast } from 'sonner';
 import { Users, Loader2, Phone } from 'lucide-react';
@@ -22,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 export default function Roteirista() {
   const { selectedUnit } = useUnit();
@@ -30,6 +35,7 @@ export default function Roteirista() {
   const [callDialogOpen, setCallDialogOpen] = useState(false);
   const [selectedEntregador, setSelectedEntregador] = useState<Entregador | null>(null);
   const [deliveryCount, setDeliveryCount] = useState('1');
+  const [tipoBag, setTipoBag] = useState<TipoBag>('normal');
   const [isSending, setIsSending] = useState(false);
 
   // Redirect if no unit selected
@@ -56,8 +62,9 @@ export default function Roteirista() {
     },
   });
 
-  // Filter by status for display
-  const availableQueue = entregadores.filter((e) => e.status === 'disponivel');
+  // Filter by status and shift/workdays for display
+  const availableQueue = entregadores
+    .filter((e) => e.status === 'disponivel' && shouldShowInQueue(e));
   const calledQueue = entregadores.filter((e) => e.status === 'chamado');
   const deliveringQueue = entregadores.filter((e) => e.status === 'entregando');
 
@@ -71,6 +78,7 @@ export default function Roteirista() {
     }
     setSelectedEntregador(nextInQueue);
     setDeliveryCount('1');
+    setTipoBag('normal');
     setCallDialogOpen(true);
   };
 
@@ -81,16 +89,30 @@ export default function Roteirista() {
     setIsSending(true);
     
     try {
-      // Update status to "chamado"
+      // Update status to "chamado" and set tipo_bag
       await updateMutation.mutateAsync({
         id: selectedEntregador.id,
-        data: { status: 'chamado' },
+        data: { 
+          status: 'chamado',
+          tipo_bag: tipoBag,
+        },
       });
 
-      // Send WhatsApp message with delivery count
+      // Create historico entry
+      await createHistoricoEntrega({
+        entregador_id: selectedEntregador.id,
+        unidade: selectedUnit,
+        tipo_bag: tipoBag,
+      });
+
+      // Send WhatsApp message with delivery count and bag type
+      const bagMessage = tipoBag === 'metro' 
+        ? '🎒 Pegue a BAG METRO' 
+        : '🎒 Pegue uma BAG NORMAL';
+      
       const message = count === 1 
-        ? `🍕 Sua vez na unidade ${selectedUnit}! Você tem 1 entrega. Vá ao balcão.`
-        : `🍕 Sua vez na unidade ${selectedUnit}! Você tem ${count} entregas. Vá ao balcão.`;
+        ? `🍕 Sua vez na unidade ${selectedUnit}! Você tem 1 entrega. ${bagMessage}. Vá ao balcão.`
+        : `🍕 Sua vez na unidade ${selectedUnit}! Você tem ${count} entregas. ${bagMessage}. Vá ao balcão.`;
       
       await sendWhatsAppMessage(selectedEntregador.telefone, message);
 
@@ -112,7 +134,10 @@ export default function Roteirista() {
         timersRef.current[entregador.id] = setTimeout(() => {
           updateMutation.mutate({
             id: entregador.id,
-            data: { status: 'entregando' },
+            data: { 
+              status: 'entregando',
+              hora_saida: new Date().toISOString(),
+            },
           });
           delete timersRef.current[entregador.id];
         }, 10000);
@@ -131,6 +156,31 @@ export default function Roteirista() {
       Object.values(timersRef.current).forEach(clearTimeout);
     };
   }, [calledQueue]);
+
+  // Failsafe: Auto-return after 1 hour in delivery
+  useEffect(() => {
+    const checkOvertime = () => {
+      deliveringQueue.forEach((entregador) => {
+        if (entregador.hora_saida && isOverTimeLimit(entregador.hora_saida)) {
+          updateMutation.mutate({
+            id: entregador.id,
+            data: { 
+              status: 'disponivel',
+              fila_posicao: new Date().toISOString(),
+              hora_saida: null,
+            },
+          });
+          toast.info(`${entregador.nome} retornou automaticamente após 1 hora em entrega`);
+        }
+      });
+    };
+
+    // Check every minute
+    const interval = setInterval(checkOvertime, 60000);
+    checkOvertime(); // Check immediately on load
+
+    return () => clearInterval(interval);
+  }, [deliveringQueue]);
 
   return (
     <Layout>
@@ -189,27 +239,7 @@ export default function Roteirista() {
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Em Entrega Section */}
-          {deliveringQueue.length > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-status-delivering" />
-                Em Entrega ({deliveringQueue.length})
-              </h2>
-              <div className="space-y-3">
-                {deliveringQueue.map((entregador, index) => (
-                  <QueueCard
-                    key={entregador.id}
-                    entregador={entregador}
-                    position={index + 1}
-                    isLoading={updateMutation.isPending}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Available Queue */}
+          {/* Available Queue - Only this section now */}
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Users className="w-5 h-5 text-primary" />
@@ -230,6 +260,7 @@ export default function Roteirista() {
                     onCall={() => {
                       setSelectedEntregador(entregador);
                       setDeliveryCount('1');
+                      setTipoBag('normal');
                       setCallDialogOpen(true);
                     }}
                     isLoading={updateMutation.isPending}
@@ -267,6 +298,40 @@ export default function Roteirista() {
                   onChange={(e) => setDeliveryCount(e.target.value)}
                   className="text-4xl font-mono text-center h-20"
                 />
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-lg">Tipo de BAG</Label>
+                <RadioGroup
+                  value={tipoBag}
+                  onValueChange={(value) => setTipoBag(value as TipoBag)}
+                  className="grid grid-cols-2 gap-4"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="normal" id="bag-normal" />
+                    <Label 
+                      htmlFor="bag-normal" 
+                      className="flex-1 cursor-pointer p-4 border-2 rounded-lg hover:border-primary transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/10"
+                    >
+                      <div className="text-center">
+                        <span className="text-2xl">🎒</span>
+                        <p className="font-semibold mt-1">BAG Normal</p>
+                      </div>
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="metro" id="bag-metro" />
+                    <Label 
+                      htmlFor="bag-metro" 
+                      className="flex-1 cursor-pointer p-4 border-2 rounded-lg hover:border-primary transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/10"
+                    >
+                      <div className="text-center">
+                        <span className="text-2xl">📦</span>
+                        <p className="font-semibold mt-1">BAG Metro</p>
+                      </div>
+                    </Label>
+                  </div>
+                </RadioGroup>
               </div>
             </div>
           )}
