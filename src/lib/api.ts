@@ -131,14 +131,7 @@ export function shouldShowInQueue(entregador: Entregador): boolean {
   return true;
 }
 
-// Verifica se um entregador está em entrega por mais de 1 hora
-export function isOverTimeLimit(horaSaida: string): boolean {
-  const saida = new Date(horaSaida);
-  const now = new Date();
-  const diffMs = now.getTime() - saida.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-  return diffHours >= 1;
-}
+// Função removida - failsafe de 1 hora não mais necessário
 
 // Fetch all entregadores with optional filters
 export async function fetchEntregadores(filters?: {
@@ -172,19 +165,24 @@ export async function fetchEntregadores(filters?: {
 
 // Create new entregador
 export async function createEntregador(data: CreateEntregadorData): Promise<Entregador> {
+  const insertData: Record<string, unknown> = {
+    nome: data.nome,
+    telefone: data.telefone,
+    unidade: data.unidade,
+    status: data.status,
+    ativo: data.ativo,
+    usar_turno_padrao: data.usar_turno_padrao,
+    turno_inicio: data.turno_inicio,
+    turno_fim: data.turno_fim,
+  };
+
+  if (data.dias_trabalho) {
+    insertData.dias_trabalho = data.dias_trabalho;
+  }
+
   const { data: result, error } = await supabase
     .from('entregadores')
-    .insert({
-      nome: data.nome,
-      telefone: data.telefone,
-      unidade: data.unidade,
-      status: data.status,
-      ativo: data.ativo,
-      dias_trabalho: data.dias_trabalho as unknown as Record<string, unknown>,
-      usar_turno_padrao: data.usar_turno_padrao,
-      turno_inicio: data.turno_inicio,
-      turno_fim: data.turno_fim,
-    })
+    .insert(insertData as { nome: string; telefone: string; unidade: string })
     .select()
     .single();
 
@@ -200,10 +198,19 @@ export async function updateEntregador(
   id: string,
   data: Partial<Entregador>
 ): Promise<Entregador> {
-  const updateData = {
-    ...data,
-    dias_trabalho: data.dias_trabalho as unknown as Record<string, unknown>,
-  };
+  const updateData: Record<string, unknown> = {};
+  
+  // Copy all properties except dias_trabalho
+  Object.entries(data).forEach(([key, value]) => {
+    if (key !== 'dias_trabalho') {
+      updateData[key] = value;
+    }
+  });
+
+  // Handle dias_trabalho separately to avoid type issues
+  if (data.dias_trabalho !== undefined) {
+    updateData.dias_trabalho = data.dias_trabalho;
+  }
   
   const { data: result, error } = await supabase
     .from('entregadores')
