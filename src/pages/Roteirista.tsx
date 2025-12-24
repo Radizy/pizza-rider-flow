@@ -2,19 +2,17 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
 import { Layout, BackButton } from '@/components/Layout';
-import { QueueCard } from '@/components/QueueCard';
 import {
   fetchEntregadores,
   updateEntregador,
   sendWhatsAppMessage,
   createHistoricoEntrega,
   shouldShowInQueue,
-  isOverTimeLimit,
   Entregador,
   TipoBag,
 } from '@/lib/api';
 import { toast } from 'sonner';
-import { Users, Loader2, Phone } from 'lucide-react';
+import { Users, Loader2, Phone, GripVertical } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import {
   Dialog,
@@ -27,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 export default function Roteirista() {
   const { selectedUnit } = useUnit();
@@ -70,6 +69,7 @@ export default function Roteirista() {
 
   // Próximo da fila
   const nextInQueue = availableQueue[0] || null;
+  const secondInQueue = availableQueue[1] || null;
 
   const openCallDialog = () => {
     if (!nextInQueue) {
@@ -118,6 +118,19 @@ export default function Roteirista() {
 
       toast.success(`${selectedEntregador.nome} foi chamado com ${count} entrega(s)!`);
       setCallDialogOpen(false);
+
+      // Enviar mensagem para o segundo da fila após 5 segundos
+      if (secondInQueue) {
+        setTimeout(async () => {
+          try {
+            const alertMessage = `⚠️ Atenção ${secondInQueue.nome}! Você é o próximo da fila na unidade ${selectedUnit}. Fique alerta!`;
+            await sendWhatsAppMessage(secondInQueue.telefone, alertMessage);
+            toast.info(`Alerta enviado para ${secondInQueue.nome}`);
+          } catch (error) {
+            console.error('Erro ao enviar alerta para segundo da fila:', error);
+          }
+        }, 5000);
+      }
     } catch (error) {
       toast.error('Erro ao chamar entregador');
     } finally {
@@ -157,30 +170,40 @@ export default function Roteirista() {
     };
   }, [calledQueue]);
 
-  // Failsafe: Auto-return after 1 hour in delivery
-  useEffect(() => {
-    const checkOvertime = () => {
-      deliveringQueue.forEach((entregador) => {
-        if (entregador.hora_saida && isOverTimeLimit(entregador.hora_saida)) {
-          updateMutation.mutate({
-            id: entregador.id,
-            data: { 
-              status: 'disponivel',
-              fila_posicao: new Date().toISOString(),
-              hora_saida: null,
-            },
-          });
-          toast.info(`${entregador.nome} retornou automaticamente após 1 hora em entrega`);
-        }
+  // Removido failsafe de 1 hora - não mais necessário
+
+  // Handle drag and drop reorder
+  const handleDragEnd = async (result: DropResult) => {
+    if (!result.destination) return;
+
+    const sourceIndex = result.source.index;
+    const destIndex = result.destination.index;
+
+    if (sourceIndex === destIndex) return;
+
+    // Reorder the local array
+    const reordered = [...availableQueue];
+    const [removed] = reordered.splice(sourceIndex, 1);
+    reordered.splice(destIndex, 0, removed);
+
+    // Update fila_posicao for all affected entregadores
+    const now = new Date();
+    const updates = reordered.map((entregador, index) => {
+      // Create timestamps that preserve the new order
+      const newTimestamp = new Date(now.getTime() + index * 1000).toISOString();
+      return updateMutation.mutateAsync({
+        id: entregador.id,
+        data: { fila_posicao: newTimestamp },
       });
-    };
+    });
 
-    // Check every minute
-    const interval = setInterval(checkOvertime, 60000);
-    checkOvertime(); // Check immediately on load
-
-    return () => clearInterval(interval);
-  }, [deliveringQueue]);
+    try {
+      await Promise.all(updates);
+      toast.success('Ordem da fila atualizada!');
+    } catch (error) {
+      toast.error('Erro ao reordenar fila');
+    }
+  };
 
   return (
     <Layout>
@@ -239,11 +262,14 @@ export default function Roteirista() {
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Available Queue - Only this section now */}
+          {/* Available Queue with Drag and Drop */}
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Users className="w-5 h-5 text-primary" />
               Fila de Disponíveis ({availableQueue.length})
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                (arraste para reordenar)
+              </span>
             </h2>
             {availableQueue.length === 0 ? (
               <div className="text-center py-12 bg-card border border-dashed border-border rounded-lg">
@@ -251,22 +277,65 @@ export default function Roteirista() {
                 <p className="text-muted-foreground">Nenhum entregador disponível</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {availableQueue.map((entregador, index) => (
-                  <QueueCard
-                    key={entregador.id}
-                    entregador={entregador}
-                    position={index + 1}
-                    onCall={() => {
-                      setSelectedEntregador(entregador);
-                      setDeliveryCount('1');
-                      setTipoBag('normal');
-                      setCallDialogOpen(true);
-                    }}
-                    isLoading={updateMutation.isPending}
-                  />
-                ))}
-              </div>
+              <DragDropContext onDragEnd={handleDragEnd}>
+                <Droppable droppableId="queue">
+                  {(provided) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className="space-y-3"
+                    >
+                      {availableQueue.map((entregador, index) => (
+                        <Draggable
+                          key={entregador.id}
+                          draggableId={entregador.id}
+                          index={index}
+                        >
+                          {(provided, snapshot) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              className={`flex items-center gap-4 bg-card border border-border rounded-xl p-4 transition-shadow ${
+                                snapshot.isDragging ? 'shadow-lg ring-2 ring-primary' : ''
+                              }`}
+                            >
+                              <div
+                                {...provided.dragHandleProps}
+                                className="cursor-grab active:cursor-grabbing p-2 hover:bg-secondary rounded-lg"
+                              >
+                                <GripVertical className="w-5 h-5 text-muted-foreground" />
+                              </div>
+                              <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-xl font-bold font-mono">
+                                {index + 1}
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-lg font-semibold">{entregador.nome}</p>
+                                <p className="text-sm text-muted-foreground">{entregador.telefone}</p>
+                              </div>
+                              <div className="w-3 h-3 rounded-full bg-status-available" />
+                              <Button
+                                onClick={() => {
+                                  setSelectedEntregador(entregador);
+                                  setDeliveryCount('1');
+                                  setTipoBag('normal');
+                                  setCallDialogOpen(true);
+                                }}
+                                variant="outline"
+                                size="sm"
+                                disabled={updateMutation.isPending}
+                              >
+                                <Phone className="w-4 h-4 mr-1" />
+                                Chamar
+                              </Button>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
             )}
           </div>
         </div>
