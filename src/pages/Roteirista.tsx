@@ -12,7 +12,7 @@ import {
   TipoBag,
 } from '@/lib/api';
 import { toast } from 'sonner';
-import { Users, Loader2, Phone, GripVertical } from 'lucide-react';
+import { Users, Loader2, Phone, GripVertical, SkipForward, UserMinus } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import {
   Dialog,
@@ -24,7 +24,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 export default function Roteirista() {
@@ -32,9 +39,11 @@ export default function Roteirista() {
   const queryClient = useQueryClient();
   
   const [callDialogOpen, setCallDialogOpen] = useState(false);
+  const [skipDialogOpen, setSkipDialogOpen] = useState(false);
   const [selectedEntregador, setSelectedEntregador] = useState<Entregador | null>(null);
   const [deliveryCount, setDeliveryCount] = useState('1');
   const [tipoBag, setTipoBag] = useState<TipoBag>('normal');
+  const [skipReason, setSkipReason] = useState('');
   const [isSending, setIsSending] = useState(false);
 
   // Redirect if no unit selected
@@ -138,39 +147,46 @@ export default function Roteirista() {
     }
   };
 
-  // Timer para mudar chamados para entregando após 10 segundos
-  const timersRef = useRef<Record<string, NodeJS.Timeout>>({});
-  
-  useEffect(() => {
-    calledQueue.forEach((entregador) => {
-      if (!timersRef.current[entregador.id]) {
-        timersRef.current[entregador.id] = setTimeout(() => {
-          updateMutation.mutate({
-            id: entregador.id,
-            data: { 
-              status: 'entregando',
-              hora_saida: new Date().toISOString(),
-            },
-          });
-          delete timersRef.current[entregador.id];
-        }, 10000);
-      }
-    });
+  // Pular a vez do motoboy (vai para o fim da fila)
+  const handleSkipTurn = async () => {
+    if (!selectedEntregador || !skipReason.trim()) {
+      toast.error('Informe o motivo para pular a vez');
+      return;
+    }
 
-    // Limpar timers para entregadores que não estão mais como chamado
-    Object.keys(timersRef.current).forEach((id) => {
-      if (!calledQueue.find((e) => e.id === id)) {
-        clearTimeout(timersRef.current[id]);
-        delete timersRef.current[id];
-      }
-    });
+    try {
+      // Move para o fim da fila atualizando fila_posicao
+      await updateMutation.mutateAsync({
+        id: selectedEntregador.id,
+        data: { 
+          fila_posicao: new Date().toISOString(),
+        },
+      });
+      
+      toast.success(`${selectedEntregador.nome} foi para o fim da fila. Motivo: ${skipReason}`);
+      setSkipDialogOpen(false);
+      setSkipReason('');
+      setSelectedEntregador(null);
+    } catch (error) {
+      toast.error('Erro ao pular a vez');
+    }
+  };
 
-    return () => {
-      Object.values(timersRef.current).forEach(clearTimeout);
-    };
-  }, [calledQueue]);
-
-  // Removido failsafe de 1 hora - não mais necessário
+  // Remover da fila (desativa temporariamente)
+  const handleRemoveFromQueue = async (entregador: Entregador) => {
+    try {
+      await updateMutation.mutateAsync({
+        id: entregador.id,
+        data: { 
+          ativo: false,
+        },
+      });
+      
+      toast.success(`${entregador.nome} foi removido da fila`);
+    } catch (error) {
+      toast.error('Erro ao remover da fila');
+    }
+  };
 
   // Handle drag and drop reorder
   const handleDragEnd = async (result: DropResult) => {
@@ -313,20 +329,35 @@ export default function Roteirista() {
                                 <p className="text-sm text-muted-foreground">{entregador.telefone}</p>
                               </div>
                               <div className="w-3 h-3 rounded-full bg-status-available" />
-                              <Button
-                                onClick={() => {
-                                  setSelectedEntregador(entregador);
-                                  setDeliveryCount('1');
-                                  setTipoBag('normal');
-                                  setCallDialogOpen(true);
-                                }}
-                                variant="outline"
-                                size="sm"
-                                disabled={updateMutation.isPending}
-                              >
-                                <Phone className="w-4 h-4 mr-1" />
-                                Chamar
-                              </Button>
+                              
+                              {/* Dropdown menu para ações */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="outline" size="sm">
+                                    Ações
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedEntregador(entregador);
+                                      setSkipReason('');
+                                      setSkipDialogOpen(true);
+                                    }}
+                                    className="gap-2"
+                                  >
+                                    <SkipForward className="w-4 h-4" />
+                                    Pular a vez
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleRemoveFromQueue(entregador)}
+                                    className="gap-2 text-destructive"
+                                  >
+                                    <UserMinus className="w-4 h-4" />
+                                    Remover da fila
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           )}
                         </Draggable>
@@ -423,6 +454,55 @@ export default function Roteirista() {
                 <Loader2 className="w-5 h-5 animate-spin mr-2" />
               ) : null}
               CHAMAR
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Skip Dialog */}
+      <Dialog open={skipDialogOpen} onOpenChange={setSkipDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-xl">Pular a Vez</DialogTitle>
+          </DialogHeader>
+          
+          {selectedEntregador && (
+            <div className="space-y-4 py-4">
+              <div className="bg-secondary rounded-lg p-4 text-center">
+                <p className="text-sm text-muted-foreground mb-1">Motoboy</p>
+                <p className="text-xl font-bold font-mono">{selectedEntregador.nome}</p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="skipReason">Motivo para pular a vez</Label>
+                <Textarea
+                  id="skipReason"
+                  value={skipReason}
+                  onChange={(e) => setSkipReason(e.target.value)}
+                  placeholder="Ex: Não estava pronto, foi ao banheiro..."
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter className="gap-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSkipDialogOpen(false);
+                setSkipReason('');
+              }}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSkipTurn}
+              disabled={!skipReason.trim()}
+              className="flex-1"
+            >
+              Pular Vez
             </Button>
           </DialogFooter>
         </DialogContent>

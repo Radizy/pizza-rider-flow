@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
 import { Layout, BackButton } from '@/components/Layout';
@@ -6,12 +6,10 @@ import {
   fetchEntregadores,
   fetchHistoricoEntregas,
   deleteOldHistorico,
-  Entregador,
-  HistoricoEntrega,
   HORARIO_EXPEDIENTE,
 } from '@/lib/api';
 import { toast } from 'sonner';
-import { History, Download, Loader2, Users, Trash2, Clock } from 'lucide-react';
+import { History, Download, Loader2, Users, Trash2, Clock, FileSpreadsheet, Copy } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +20,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 
 interface EntregadorContagem {
   id: string;
@@ -30,9 +38,62 @@ interface EntregadorContagem {
   entregas: number;
 }
 
+const APP_SCRIPT_CODE = `// Google Apps Script - Cole este código no Editor de Script
+// Acesse: https://script.google.com/home
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Nome da aba: Unidade-DD/MM
+    const sheetName = data.unidade + '-' + data.data;
+    
+    // Criar ou obter a aba
+    let sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      // Cabeçalhos
+      sheet.getRange(1, 1, 1, 3).setValues([['Nome', 'Telefone', 'Entregas']]);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    }
+    
+    // Limpar dados antigos (mantém cabeçalho)
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
+    }
+    
+    // Inserir novos dados
+    if (data.entregas && data.entregas.length > 0) {
+      const values = data.entregas.map(e => [e.nome, e.telefone, e.entregas]);
+      sheet.getRange(2, 1, values.length, 3).setValues(values);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ success: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ error: error.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// Para testar, publique como Web App:
+// 1. Deploy > New deployment
+// 2. Type: Web App
+// 3. Execute as: Me
+// 4. Who has access: Anyone
+// 5. Copie a URL gerada e cole nas configurações do app
+`;
+
 export default function Historico() {
   const { selectedUnit } = useUnit();
   const queryClient = useQueryClient();
+  const [scriptDialogOpen, setScriptDialogOpen] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState(() => 
+    localStorage.getItem('sheets_webhook_url') || ''
+  );
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Redirect if no unit selected
   if (!selectedUnit) {
@@ -168,6 +229,52 @@ export default function Historico() {
     toast.success('Arquivo exportado com sucesso!');
   };
 
+  const handleSaveWebhook = () => {
+    localStorage.setItem('sheets_webhook_url', webhookUrl);
+    toast.success('URL do webhook salva!');
+  };
+
+  const handleSyncToSheets = async () => {
+    if (!webhookUrl) {
+      toast.error('Configure a URL do webhook primeiro');
+      setScriptDialogOpen(true);
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const dataFormatted = dataInicio.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+      });
+
+      const payload = {
+        unidade: selectedUnit,
+        data: dataFormatted,
+        entregas: contagemPorEntregador.filter(e => e.entregas > 0),
+      };
+
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors', // Para evitar erro de CORS com Apps Script
+      });
+
+      toast.success('Dados enviados para a planilha!');
+    } catch (error) {
+      console.error('Erro ao sincronizar:', error);
+      toast.error('Erro ao sincronizar com a planilha');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const copyScript = () => {
+    navigator.clipboard.writeText(APP_SCRIPT_CODE);
+    toast.success('Código copiado!');
+  };
+
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('pt-BR', {
       weekday: 'long',
@@ -195,6 +302,14 @@ export default function Historico() {
               Limpar Ontem
             </Button>
           )}
+          <Button variant="outline" onClick={() => setScriptDialogOpen(true)} className="gap-2">
+            <FileSpreadsheet className="w-4 h-4" />
+            Config Planilha
+          </Button>
+          <Button variant="outline" onClick={handleSyncToSheets} disabled={isSyncing} className="gap-2">
+            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            Sincronizar
+          </Button>
           <Button onClick={handleExportExcel} className="gap-2">
             <Download className="w-4 h-4" />
             Exportar Excel
@@ -295,6 +410,75 @@ export default function Historico() {
           </Table>
         </div>
       )}
+
+      {/* Script Dialog */}
+      <Dialog open={scriptDialogOpen} onOpenChange={setScriptDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-mono flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5" />
+              Configurar Google Sheets
+            </DialogTitle>
+            <DialogDescription>
+              Configure a integração com Google Sheets para sincronizar os dados automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Webhook URL */}
+            <div className="space-y-2">
+              <Label htmlFor="webhook">URL do Web App (Google Apps Script)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="webhook"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/..."
+                />
+                <Button onClick={handleSaveWebhook}>Salvar</Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Cole aqui a URL gerada após publicar o Apps Script como Web App
+              </p>
+            </div>
+
+            {/* Instructions */}
+            <div className="space-y-3">
+              <Label>Instruções:</Label>
+              <ol className="list-decimal list-inside text-sm text-muted-foreground space-y-2">
+                <li>Crie uma nova planilha no Google Sheets</li>
+                <li>Vá em Extensões {">"} Apps Script</li>
+                <li>Cole o código abaixo no editor</li>
+                <li>Clique em Deploy {">"} New deployment</li>
+                <li>Selecione "Web App" como tipo</li>
+                <li>Configure "Execute as" como "Me" e "Who has access" como "Anyone"</li>
+                <li>Copie a URL gerada e cole no campo acima</li>
+              </ol>
+            </div>
+
+            {/* Code */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Código do Apps Script:</Label>
+                <Button variant="outline" size="sm" onClick={copyScript} className="gap-2">
+                  <Copy className="w-4 h-4" />
+                  Copiar
+                </Button>
+              </div>
+              <Textarea
+                value={APP_SCRIPT_CODE}
+                readOnly
+                className="font-mono text-xs h-64"
+              />
+            </div>
+
+            <p className="text-sm text-muted-foreground">
+              A planilha criará automaticamente uma aba para cada dia com o formato: 
+              <span className="font-mono font-semibold"> {selectedUnit}-DD/MM</span>
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
