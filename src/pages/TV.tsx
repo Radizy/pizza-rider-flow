@@ -1,32 +1,35 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUnit } from '@/contexts/UnitContext';
 import { 
   fetchEntregadores, 
+  fetchHistoricoEntregas,
   updateEntregador, 
   shouldShowInQueue,
-  Entregador 
+  Entregador,
+  HORARIO_EXPEDIENTE,
 } from '@/lib/api';
-import { Pizza, User, Volume2, VolumeX, RotateCcw, Package, UserPlus } from 'lucide-react';
-import { Navigate, Link } from 'react-router-dom';
+import { Pizza, User, Volume2, VolumeX, RotateCcw, Package, UserPlus, Medal, Trophy } from 'lucide-react';
+import { Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useTTS } from '@/hooks/useTTS';
 import { CheckinModal } from '@/components/CheckinModal';
 
 const CALL_AUDIO_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
-const DISPLAY_TIME_MS = 3000; // 3 segundos na tela após chamar
+const DISPLAY_TIME_MS = 3000; // 3 segundos máximo na tela
 
 export default function TV() {
   const { selectedUnit } = useUnit();
   const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [calledTimers, setCalledTimers] = useState<Record<string, NodeJS.Timeout>>({});
   const [currentTime, setCurrentTime] = useState(new Date());
   const [checkinOpen, setCheckinOpen] = useState(false);
-  const { speak } = useTTS();
+  const [displayingCalled, setDisplayingCalled] = useState<Entregador | null>(null);
+  const { speak, isSpeaking } = useTTS();
   const lastCacheClean = useRef<number>(Date.now());
+  const processedCallsRef = useRef<Set<string>>(new Set());
 
   // Redirect if no unit selected
   if (!selectedUnit) {
@@ -40,12 +43,75 @@ export default function TV() {
     refetchInterval: 10000, // 10 segundos
   });
 
-  // Query for all entregadores (for checkin modal)
-  const { data: allEntregadores = [], isLoading: isLoadingAll } = useQuery({
-    queryKey: ['entregadores', selectedUnit, 'all-for-checkin'],
-    queryFn: () => fetchEntregadores({ unidade: selectedUnit }),
-    enabled: checkinOpen,
+  // Calcular período do expediente atual para o rank
+  const getExpedientePeriod = () => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    let dataInicio: Date;
+    let dataFim: Date;
+
+    if (currentHour < 3) {
+      // Antes das 03:00 - expediente de ontem
+      dataInicio = new Date(now);
+      dataInicio.setDate(dataInicio.getDate() - 1);
+      dataInicio.setHours(HORARIO_EXPEDIENTE.inicio, 0, 0, 0);
+      
+      dataFim = new Date(now);
+      dataFim.setHours(3, 0, 0, 0);
+    } else if (currentHour >= HORARIO_EXPEDIENTE.inicio) {
+      // Após 17:00 - expediente de hoje
+      dataInicio = new Date(now);
+      dataInicio.setHours(HORARIO_EXPEDIENTE.inicio, 0, 0, 0);
+      
+      dataFim = new Date(now);
+      dataFim.setDate(dataFim.getDate() + 1);
+      dataFim.setHours(3, 0, 0, 0);
+    } else {
+      // Entre 03:00 e 17:00 - não há expediente ativo
+      dataInicio = new Date(now);
+      dataInicio.setHours(HORARIO_EXPEDIENTE.inicio, 0, 0, 0);
+      
+      dataFim = new Date(now);
+      dataFim.setDate(dataFim.getDate() + 1);
+      dataFim.setHours(3, 0, 0, 0);
+    }
+
+    return { dataInicio, dataFim };
+  };
+
+  const { dataInicio, dataFim } = getExpedientePeriod();
+
+  // Query para histórico do ranking
+  const { data: historico = [] } = useQuery({
+    queryKey: ['historico-rank', selectedUnit, dataInicio.toISOString()],
+    queryFn: () =>
+      fetchHistoricoEntregas({
+        unidade: selectedUnit,
+        dataInicio: dataInicio.toISOString(),
+        dataFim: dataFim.toISOString(),
+      }),
+    refetchInterval: 30000,
   });
+
+  // Calcular top 3 por entregas
+  const top3 = useMemo(() => {
+    const contagem: Record<string, { nome: string; entregas: number }> = {};
+
+    historico.forEach((h) => {
+      const entregador = entregadores.find(e => e.id === h.entregador_id);
+      if (entregador) {
+        if (!contagem[h.entregador_id]) {
+          contagem[h.entregador_id] = { nome: entregador.nome, entregas: 0 };
+        }
+        contagem[h.entregador_id].entregas++;
+      }
+    });
+
+    return Object.values(contagem)
+      .sort((a, b) => b.entregas - a.entregas)
+      .slice(0, 3);
+  }, [historico, entregadores]);
 
   // Mutation for updating status
   const updateMutation = useMutation({
@@ -78,7 +144,6 @@ export default function TV() {
       const oneHour = 60 * 60 * 1000;
       
       if (now - lastCacheClean.current >= oneHour) {
-        // Apenas invalida o cache de consultas antigas, sem remover dados da fila
         queryClient.invalidateQueries({ 
           queryKey: ['entregadores'],
           refetchType: 'active'
@@ -88,7 +153,7 @@ export default function TV() {
       }
     };
 
-    const interval = setInterval(checkCacheClean, 60000); // Check every minute
+    const interval = setInterval(checkCacheClean, 60000);
     return () => clearInterval(interval);
   }, [queryClient]);
 
@@ -109,30 +174,21 @@ export default function TV() {
     await speak(ttsText);
   }, [isMuted, speak]);
 
-  // Track which entregadores have been announced
-  const announcedRef = useRef<Set<string>>(new Set());
-
+  // Processar chamados - exibir por 3 segundos e depois mudar para entregando
   useEffect(() => {
     calledEntregadores.forEach((entregador) => {
-      if (!announcedRef.current.has(entregador.id)) {
-        announcedRef.current.add(entregador.id);
+      // Só processa se ainda não foi processado
+      if (!processedCallsRef.current.has(entregador.id)) {
+        processedCallsRef.current.add(entregador.id);
+        
+        // Exibir na tela
+        setDisplayingCalled(entregador);
+        
+        // Tocar som e TTS
         handleCallAnnouncement(entregador);
-      }
-    });
-
-    // Clean up announced set for entregadores no longer called
-    announcedRef.current.forEach((id) => {
-      if (!calledEntregadores.find((e) => e.id === id)) {
-        announcedRef.current.delete(id);
-      }
-    });
-  }, [calledEntregadores, handleCallAnnouncement]);
-
-  // Auto-transition from chamado to entregando after display time (3 seconds or after TTS)
-  useEffect(() => {
-    calledEntregadores.forEach((entregador) => {
-      if (!calledTimers[entregador.id]) {
-        const timer = setTimeout(() => {
+        
+        // Após 3 segundos, muda para entregando
+        setTimeout(() => {
           updateMutation.mutate({
             id: entregador.id,
             data: { 
@@ -140,33 +196,20 @@ export default function TV() {
               hora_saida: new Date().toISOString(),
             },
           });
-          setCalledTimers((prev) => {
-            const newTimers = { ...prev };
-            delete newTimers[entregador.id];
-            return newTimers;
-          });
+          setDisplayingCalled(null);
         }, DISPLAY_TIME_MS);
-
-        setCalledTimers((prev) => ({ ...prev, [entregador.id]: timer }));
       }
     });
 
-    // Cleanup timers for entregadores no longer called
-    Object.keys(calledTimers).forEach((id) => {
-      if (!calledEntregadores.find((e) => e.id === id)) {
-        clearTimeout(calledTimers[id]);
-        setCalledTimers((prev) => {
-          const newTimers = { ...prev };
-          delete newTimers[id];
-          return newTimers;
-        });
+    // Limpar IDs de entregadores que não estão mais chamados
+    processedCallsRef.current.forEach((id) => {
+      const stillCalled = calledEntregadores.find((e) => e.id === id);
+      const nowDelivering = deliveringQueue.find((e) => e.id === id);
+      if (!stillCalled && !nowDelivering) {
+        processedCallsRef.current.delete(id);
       }
     });
-
-    return () => {
-      Object.values(calledTimers).forEach(clearTimeout);
-    };
-  }, [calledEntregadores]);
+  }, [calledEntregadores, handleCallAnnouncement, updateMutation, deliveringQueue]);
 
   const handleReturn = async (entregador: Entregador) => {
     try {
@@ -178,7 +221,6 @@ export default function TV() {
           hora_saida: null,
         },
       });
-      // Refetch immediately after return
       refetch();
       toast.success(`${entregador.nome} voltou para a fila!`);
     } catch (error) {
@@ -204,9 +246,9 @@ export default function TV() {
     }
   };
 
-  // Se tem alguém chamado, mostra tela fullscreen
-  if (calledEntregadores.length > 0) {
-    const chamado = calledEntregadores[0];
+  // Se tem alguém sendo exibido como chamado
+  if (displayingCalled) {
+    const chamado = displayingCalled;
     const bagText = chamado.tipo_bag === 'metro' ? 'BAG METRO' : 'BAG NORMAL';
     const bagIcon = chamado.tipo_bag === 'metro' ? '📦' : '🎒';
     
@@ -252,14 +294,11 @@ export default function TV() {
           )}
         </button>
 
-        {/* Back to home */}
-        <Link 
-          to="/" 
-          className="absolute top-6 left-6 flex items-center gap-2 px-4 py-2 rounded-lg bg-background/20 hover:bg-background/30 transition-colors text-accent-foreground"
-        >
+        {/* Logo sem link */}
+        <div className="absolute top-6 left-6 flex items-center gap-2 px-4 py-2 rounded-lg bg-background/20 text-accent-foreground">
           <Pizza className="w-5 h-5" />
           <span className="font-mono font-bold">Fila Dom Fiorentino</span>
-        </Link>
+        </div>
       </div>
     );
   }
@@ -269,9 +308,9 @@ export default function TV() {
       {/* Hidden audio element */}
       <audio ref={audioRef} src={CALL_AUDIO_URL} preload="auto" />
 
-      {/* Header */}
+      {/* Header - Logo sem link */}
       <header className="flex items-center justify-between px-8 py-4 border-b border-border bg-card/50">
-        <Link to="/" className="flex items-center gap-3">
+        <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
             <Pizza className="w-6 h-6 text-primary-foreground" />
           </div>
@@ -281,7 +320,7 @@ export default function TV() {
               {selectedUnit}
             </span>
           </div>
-        </Link>
+        </div>
 
         <div className="flex items-center gap-4">
           {/* Check-in button */}
@@ -308,7 +347,7 @@ export default function TV() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 grid lg:grid-cols-2 gap-0">
+      <div className="flex-1 grid lg:grid-cols-2 gap-0 relative">
         {/* Left Column - Queue */}
         <div className="border-r border-border p-8 overflow-hidden">
           <h2 className="text-2xl font-bold font-mono mb-6 flex items-center gap-3">
@@ -392,6 +431,30 @@ export default function TV() {
             </div>
           )}
         </div>
+
+        {/* Rank no canto inferior esquerdo */}
+        {top3.length > 0 && (
+          <div className="absolute bottom-4 left-4 bg-card/95 border border-border rounded-xl p-4 shadow-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <Trophy className="w-5 h-5 text-yellow-500" />
+              <span className="font-mono font-bold text-sm">Top da Noite</span>
+            </div>
+            <div className="space-y-2">
+              {top3.map((item, index) => {
+                const medals = ['🥇', '🥈', '🥉'];
+                return (
+                  <div key={index} className="flex items-center gap-2 text-sm">
+                    <span className="text-lg">{medals[index]}</span>
+                    <span className="font-medium flex-1">{item.nome}</span>
+                    <span className="font-mono font-bold text-muted-foreground">
+                      {item.entregas}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -408,9 +471,9 @@ export default function TV() {
       <CheckinModal
         open={checkinOpen}
         onOpenChange={setCheckinOpen}
-        entregadores={allEntregadores}
+        entregadores={entregadores}
         onCheckin={handleCheckin}
-        isLoading={isLoadingAll}
+        isLoading={false}
       />
     </div>
   );

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getMotoboyPosition, Unidade } from '@/lib/api';
 import { Pizza, User, Loader2, Search, Truck, Clock } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -127,15 +126,15 @@ export default function MeuLugar() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+      {/* Header - Logo sem link */}
       <header className="border-b border-border bg-card/50">
         <div className="container py-4">
-          <Link to="/" className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <Pizza className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="font-mono font-bold text-lg">Fila Dom Fiorentino</span>
-          </Link>
+          </div>
         </div>
       </header>
 
